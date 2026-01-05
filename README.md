@@ -34,8 +34,8 @@ Before setting up the project, ensure the following are installed on your machin
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/llm-self-healing-pipeline.git
-cd llm-self-healing-pipeline
+git clone https://github.com/Akashvexma/self-healing-compiler-.git
+cd self-healing-compiler
 ```
 
 ### Run the application locally:
