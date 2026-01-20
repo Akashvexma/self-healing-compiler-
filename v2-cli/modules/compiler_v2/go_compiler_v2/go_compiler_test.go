@@ -42,7 +42,7 @@ func TestCompileStringToGo(t *testing.T) {
 			// Read the code from the file
 			code, err := os.ReadFile(test.filename)
 
-			output, err := NewGoCompiler().CheckCompileErrors(code)
+			output, err := NewGoCompiler().CheckCompileErrors(string(code), "")
 
 			if err != nil && test.shouldCompile {
 				t.Errorf("Expected the code to compile, but got an output: %v \n error: %v", string(output), err)

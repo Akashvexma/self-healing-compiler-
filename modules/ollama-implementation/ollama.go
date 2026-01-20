@@ -6,8 +6,9 @@ import (
 	"net/http"
 )
 
-var OllamaEndpoint = "http://localhost:11434/api/generate" // The local endpoint for the Ollama API
-// var OllamaEndpoint = "http://host.docker.internal:11434" // The local endpoint for the Ollama API
+var OllamaEndpoint = "http://127.0.0.1:11434/api/generate" // The local endpoint for the Ollama API (explicit IPv4 to avoid IPv6 issues)
+// var OllamaEndpoint = "http://localhost:11434/api/generate" // Alternative: localhost
+// var OllamaEndpoint = "http://host.docker.internal:11434" // For Docker
 
 // Struct for request to Ollama API
 type OllamaRequest struct {
@@ -35,9 +36,9 @@ type OllamaResponse struct {
 func GetOllamaResponse(prompt string, context []int, model string) (string, []int, error) {
 	// Create request payload with the model specified and context
 	requestBody, err := json.Marshal(OllamaRequest{
-		Prompt:  prompt,
+		Prompt: prompt,
 		// Model:   "llama3.1",
-		Model: model,
+		Model:   model,
 		Context: context, // Pass the conversation context
 	})
 	if err != nil {

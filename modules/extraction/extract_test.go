@@ -71,7 +71,7 @@ var testCases = []struct {
 func TestExtraction(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			output, err := Extract(tc.input)
+			output, _, err := Extract(tc.input)
 			if output != tc.expected {
 				t.Errorf("Test %s failed: Expected %q, got %q", tc.name, tc.expected, output)
 				t.Log(err.Error())

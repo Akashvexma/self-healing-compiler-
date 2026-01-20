@@ -15,7 +15,7 @@ import (
 var startTime time.Time = time.Now()
 var model string = "codellama"
 
-type compilerFunc func([]byte, ...string) ([]byte, error)
+type compilerFunc func(string, string) ([]byte, error)
 
 func main() {
 
@@ -32,11 +32,10 @@ func main() {
 	// go RunProgram(userPrompt, conversationContext, extraction.GoPrompt, go_compiler_v2.NewGoCompiler().CheckCompileErrors)
 	// go RunProgram(userPrompt, conversationContext, extraction.RustPrompt, rust_compiler_v2.NewRustCompiler().CheckCompileErrors)
 
-
 	// Compute total execution time.
 	endtime := time.Now()
-    diff := endtime.Sub(startTime)
-    fmt.Println("Total Execution Time:", diff)
+	diff := endtime.Sub(startTime)
+	fmt.Println("Total Execution Time:", diff)
 }
 
 func RunProgram(userPrompt string, conversationContext []int, languagePrompt string, compiler compilerFunc) {
@@ -65,7 +64,7 @@ func RunProgram(userPrompt string, conversationContext []int, languagePrompt str
 		// Update the conversation context with the response
 		currentConversationContext = updatedContext
 
-		generatedCode, errExtract := extraction.Extract(response) // Handle error with string
+		generatedCode, testCode, errExtract := extraction.Extract(response) // Handle error with string
 		if errExtract != nil {
 			fmt.Printf("The LLM gave a improper string in response: %v", response)
 			userPrompt = "exit"
@@ -75,11 +74,11 @@ func RunProgram(userPrompt string, conversationContext []int, languagePrompt str
 		fmt.Println("Current Iteration:", numOfIterations)
 		fmt.Println("Ollama's response:\n\n", generatedCode)
 
-		output, err := compiler([]byte(generatedCode))
+		output, err := compiler(generatedCode, testCode)
 
 		if err != nil {
 			fmt.Printf("The code did not compile and contains the following errors: %v\n", string(output))
-			userPrompt = "Following are the errors, please fix the code. Write it again, and write only source code along with same test cases with no further explanation. The format should be ```rust <yourcode + testcases> ```  :\n" +  string(output) 
+			userPrompt = "Following are the errors, please fix the code. Write it again, and write only source code along with same test cases with no further explanation. The format should be ```rust <yourcode + testcases> ```  :\n" + string(output)
 
 			numOfIterations += 1
 		} else {

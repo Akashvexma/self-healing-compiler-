@@ -20,7 +20,8 @@ import (
 	// "go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var model string = "llama3.1"
+var model string = "llama3.2:1b"
+
 // var model string = "codellama:13b"
 // var model string = "codellama"
 
@@ -57,13 +58,13 @@ var model string = "llama3.1"
 type compilerFunc func(string, string) ([]byte, error)
 
 type ResponseData struct {
-	Iteration           uint   `json:"iteration"`
-	GeneratedCode       string `json:"generated_code"`
-	GeneratedCode1      string `json:"generatedCode1"`  // Add this
-	GeneratedCode2      string `json:"generatedCode2"`  // Add this
-	CompilerOutput      string `json:"compiler_output"`
+	Iteration            uint   `json:"iteration"`
+	GeneratedCode        string `json:"generated_code"`
+	GeneratedCode1       string `json:"generatedCode1"` // Add this
+	GeneratedCode2       string `json:"generatedCode2"` // Add this
+	CompilerOutput       string `json:"compiler_output"`
 	CompiledSuccessfully bool   `json:"compiled_successfully"`
-	TotalExecutionTime  string `json:"total_execution_time,omitempty"`
+	TotalExecutionTime   string `json:"total_execution_time,omitempty"`
 }
 
 // WebSocket upgrader
@@ -128,38 +129,46 @@ func serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-    conn, err := upgrader.Upgrade(w, r, nil)
-    if err != nil {
-        fmt.Println("Error upgrading to WebSocket:", err)
-        return
-    }
-    defer conn.Close()
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		fmt.Println("Error upgrading to WebSocket:", err)
+		return
+	}
+	defer conn.Close()
 
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-    var msg map[string]string
-    if err := conn.ReadJSON(&msg); err != nil {
-        fmt.Println("Error reading JSON:", err)
-        return
-    }
-    userPrompt := msg["prompt"]
+	var msg map[string]string
+	if err := conn.ReadJSON(&msg); err != nil {
+		// Normal close codes (1000, 1001) are expected when client disconnects
+		if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			fmt.Printf("WebSocket error: %v\n", err)
+		}
+		return
+	}
+	userPrompt := msg["prompt"]
 
-    // Update model based on user selection
-    if selectedModel, ok := msg["model"]; ok {
-        model = selectedModel
-        fmt.Println("Model updated to:", model)
-    }
+	// Update model based on user selection
+	if selectedModel, ok := msg["model"]; ok {
+		model = selectedModel
+		fmt.Println("Model updated to:", model)
+	}
 
-    go RunProgram(ctx, conn, userPrompt, extraction.GoPrompt, go_compiler_v2.NewGoCompiler().CheckCompileErrors)
+	go RunProgram(ctx, conn, userPrompt, extraction.GoPrompt, go_compiler_v2.NewGoCompiler().CheckCompileErrors)
 
-    for {
-        _, _, err := conn.ReadMessage()
-        if err != nil {
-            cancel()
-            break
-        }
-    }
+	// Keep connection open and listen for client disconnect or cancellation messages
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			// Normal close - client disconnected
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				fmt.Printf("WebSocket closed: %v\n", err)
+			}
+			cancel()
+			break
+		}
+	}
 }
 
 func RunProgram(ctx context.Context, conn *websocket.Conn, userPrompt string, languagePrompt string, compiler compilerFunc) {
@@ -194,17 +203,27 @@ func RunProgram(ctx context.Context, conn *websocket.Conn, userPrompt string, la
 
 			fmt.Println("LLM Response", response)
 			currentConversationContext = updatedContext
-			generatedCode1, generatedCode2, errExtract := extraction.Extract(response)
 
-			fmt.Println("\n\nExtraction", generatedCode1)
-			fmt.Println("\n\nExtraction", generatedCode2)
+			// Use new extraction with fallback strategy
+			extractor := extraction.NewExtractor()
+			generatedCode1, generatedCode2, strategyUsed, errExtract := extractor.Extract(response)
 
-			// Handle extraction errors
+			// If extraction fails, use fallback
 			if errExtract != nil {
-				fmt.Println("Improper LLM response")
-				conn.WriteJSON(ResponseData{CompilerOutput: "Improper LLM response"})
+				fmt.Printf("Extraction failed with error: %v. Using fallback strategy...\n", errExtract)
+				generatedCode1, generatedCode2, strategyUsed = extractor.ExtractWithFallback(response)
+			}
+
+			fmt.Printf("Extraction successful using strategy: %s\n", strategyUsed)
+			fmt.Println("Main code extracted:", len(generatedCode1), "bytes")
+			fmt.Println("Test code extracted:", len(generatedCode2), "bytes")
+
+			// Handle empty code extraction
+			if len(generatedCode1) == 0 {
+				fmt.Println("Improper LLM response: main code is empty")
+				conn.WriteJSON(ResponseData{CompilerOutput: "Improper LLM response: main code is empty"})
 				continue
-			} 
+			}
 
 			// Compile the generated code
 			output, err := compiler(generatedCode1, generatedCode2)
@@ -213,18 +232,17 @@ func RunProgram(ctx context.Context, conn *websocket.Conn, userPrompt string, la
 
 			// Prepare response data with generatedCode1 and generatedCode2
 			responseData := ResponseData{
-				Iteration:           numOfIterations,
-				GeneratedCode:       response,
-				GeneratedCode1:      generatedCode1,   // Include here
-				GeneratedCode2:      generatedCode2,   // Include here
-				CompilerOutput:      removeLinesContaining(removeGoModTidyLines(removeUnwantedLines(string(output)))),
+				Iteration:            numOfIterations,
+				GeneratedCode:        response,
+				GeneratedCode1:       generatedCode1, // Include here
+				GeneratedCode2:       generatedCode2, // Include here
+				CompilerOutput:       removeLinesContaining(removeGoModTidyLines(removeUnwantedLines(string(output)))),
 				CompiledSuccessfully: compilationSuccess,
-				TotalExecutionTime:  time.Since(startTime).String(),
+				TotalExecutionTime:   time.Since(startTime).String(),
 			}
 
 			// Insert the generated code into MongoDB
 			// insertGeneratedCode(responseData)
-
 
 			// Send iteration data back to the client
 			conn.WriteJSON(responseData)
@@ -235,7 +253,7 @@ func RunProgram(ctx context.Context, conn *websocket.Conn, userPrompt string, la
 			}
 
 			// Update prompt with errors for next iteration
-			userPrompt = "Please fix the error(s). If the error is not related to test cases, write the previous test cases again. The format should be ```go main code``` and ```go testcode```. Following is the error:\n" + (removeLinesContaining(removeGoModTidyLines(removeUnwantedLines(string(output)))))
+			userPrompt = "Fix the errors in the code. Keep the test cases. Format as two code blocks (main and test). Error:\n" + (removeLinesContaining(removeGoModTidyLines(removeUnwantedLines(string(output)))))
 			numOfIterations++
 		}
 	}
